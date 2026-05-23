@@ -13,12 +13,26 @@ export async function scrapeGeneric(url: string, ctx: BrowserContext): Promise<S
       marketplace: 'generic',
       title: data.title,
       price: null,
+      originalPrice: null,
+      pixPrice: null,
+      discountPercent: 0,
       image: data.image,
       currency: 'BRL',
       success: !!(data.title)
     }
   } catch (err: any) {
-    return { marketplace: 'generic', title: null, price: null, image: null, currency: 'BRL', success: false, error: err.message }
+    return {
+      marketplace: 'generic',
+      title: null,
+      price: null,
+      originalPrice: null,
+      pixPrice: null,
+      discountPercent: 0,
+      image: null,
+      currency: 'BRL',
+      success: false,
+      error: err.message
+    }
   } finally {
     await page.close()
   }

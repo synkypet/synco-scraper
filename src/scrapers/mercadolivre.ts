@@ -30,16 +30,31 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
         document.querySelector('meta[property="og:title"]')?.getAttribute('content') ||
         null
 
-      // Preço
-      const priceEl = document.querySelector('.andes-money-amount__fraction')
-      const priceCentsEl = document.querySelector('.andes-money-amount__cents')
-      let price: number | null = null
-      if (priceEl) {
-        const raw = priceEl.textContent?.replace(/\./g, '').replace(',', '.').trim() || ''
-        const cents = priceCentsEl?.textContent?.trim() || '00'
-        const parsed = parseFloat(`${raw}.${cents}`)
-        price = isNaN(parsed) ? null : parsed
-      }
+      // 1. Preço original (riscado)
+      const originalEl = document.querySelector('s.ui-pdp-price__original-value')
+      const originalFraction = originalEl?.querySelector('.andes-money-amount__fraction')?.textContent?.replace(/\./g, '') || ''
+      const originalCents = originalEl?.querySelector('.andes-money-amount__cents')?.textContent?.trim() || '00'
+      const originalPrice = originalFraction ? parseFloat(`${originalFraction}.${originalCents}`) : null
+
+      // 2. Preço padrão — "ou R$369,99 em outros meios" (usar este como currentPrice)
+      const subtitleText = document.querySelector('.ui-pdp-price__subtitles')?.textContent || ''
+      const subtitleMatch = subtitleText.match(/R\$\s*([\d.]+(?:,\d{2})?)/)
+      const standardPriceRaw = subtitleMatch?.[1]?.replace(/\./g, '').replace(',', '.') || null
+      const standardPrice = standardPriceRaw ? parseFloat(standardPriceRaw) : null
+
+      // 3. Preço no Pix (informativo, não usar como currentPrice)
+      const pixEl = document.querySelector('.ui-pdp-price__second-line .andes-money-amount--weight-semibold')
+      const pixFraction = pixEl?.querySelector('.andes-money-amount__fraction')?.textContent?.replace(/\./g, '') || ''
+      const pixCents = pixEl?.querySelector('.andes-money-amount__cents')?.textContent?.trim() || '00'
+      const pixPrice = pixFraction ? parseFloat(`${pixFraction}.${pixCents}`) : null
+
+      // 4. Desconto
+      const discountText = document.querySelector('.andes-money-amount__discount')?.textContent || ''
+      const discountMatch = discountText.match(/(\d+)%/)
+      const discountPercent = discountMatch ? parseInt(discountMatch[1]) : 0
+
+      // Lógica de preço final: prefere padrão, fallback para Pix, fallback para original
+      const price = standardPrice ?? pixPrice ?? originalPrice
 
       // Imagem
       const image =
@@ -47,13 +62,16 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
         document.querySelector('.ui-pdp-image')?.getAttribute('src') ||
         null
 
-      return { title, price, image }
+      return { title, price, originalPrice, pixPrice, discountPercent, image }
     })
 
     return {
       marketplace: 'mercadolivre',
       title: data.title,
       price: data.price,
+      originalPrice: data.originalPrice,
+      pixPrice: data.pixPrice,
+      discountPercent: data.discountPercent,
       image: data.image,
       currency: 'BRL',
       success: !!(data.title)
@@ -63,6 +81,9 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       marketplace: 'mercadolivre',
       title: null,
       price: null,
+      originalPrice: null,
+      pixPrice: null,
+      discountPercent: 0,
       image: null,
       currency: 'BRL',
       success: false,
