@@ -17,8 +17,8 @@ class MemoryCache {
     return entry.data
   }
 
-  set(key: string, data: any) {
-    this.store.set(key, { data, expiresAt: Date.now() + this.TTL })
+  set(key: string, data: any, ttlMs?: number) {
+    this.store.set(key, { data, expiresAt: Date.now() + (ttlMs || this.TTL) })
   }
 }
 

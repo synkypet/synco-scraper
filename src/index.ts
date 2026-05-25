@@ -3,6 +3,7 @@ import { BrowserPool } from './browser-pool'
 import { scrape } from './scraper'
 import { cache } from './cache'
 import { resolveMLProductUrl } from './scrapers/ml-resolve-social'
+import { enqueueMLJob, hashKey } from './queue'
 
 const app = express()
 app.use(express.json())
@@ -22,7 +23,7 @@ function auth(req: express.Request, res: express.Response, next: express.NextFun
 // Inicializa pool
 pool.initialize().then(() => {
   console.log(`[POOL] ${POOL_SIZE} browsers prontos`)
-  console.log(`[SCRAPER-ML] version=ml-direct-offer-timeout-20000-bypass`)
+  console.log(`[SCRAPER-ML] version=ml-queue-dedupe-v1`)
 }).catch(err => {
   console.error('[POOL] Falha ao inicializar:', err)
   process.exit(1)
@@ -44,13 +45,31 @@ app.post('/scrape', auth, async (req, res) => {
   // Cache hit
   const cached = cache.get(url)
   if (cached) {
+    const keyHash = hashKey(url);
+    console.log(`[SCRAPER-ML-CACHE] hit keyHash=${keyHash}`);
     return res.json({ ...cached, cached: true })
   }
 
   try {
-    const result = await scrape(url, pool)
-    if (result.success) cache.set(url, result)
-    return res.json(result)
+    const isML = url.includes('mercadolivre') || url.includes('meli.la') || url.includes('mercadolibre');
+
+    if (isML) {
+      const keyHash = hashKey(url);
+      console.log(`[SCRAPER-ML-CACHE] miss keyHash=${keyHash}`);
+      
+      const result = await enqueueMLJob(url, async () => {
+        return await scrape(url, pool);
+      });
+      
+      if (result.success || (result as any).title) {
+        cache.set(url, result, 10 * 60 * 1000); // 10 minutes cache
+      }
+      return res.json(result);
+    } else {
+      const result = await scrape(url, pool)
+      if (result.success) cache.set(url, result)
+      return res.json(result)
+    }
   } catch (err: any) {
     console.error('[SCRAPE ERROR]', err.message)
     return res.status(500).json({ error: 'scrape_failed', message: err.message })
@@ -65,8 +84,25 @@ app.post('/scrape/resolve-social', auth, async (req, res) => {
     return res.status(400).json({ success: false, error: 'url is required', errorCode: 'invalid_url', sourceType: 'unknown' })
   }
 
+  const cached = cache.get(url)
+  if (cached) {
+    const keyHash = hashKey(url);
+    console.log(`[SCRAPER-ML-CACHE] hit keyHash=${keyHash}`);
+    return res.json({ ...cached, cached: true })
+  }
+
   try {
-    const result = await resolveMLProductUrl(url, pool)
+    const keyHash = hashKey(url);
+    console.log(`[SCRAPER-ML-CACHE] miss keyHash=${keyHash}`);
+    
+    const result = await enqueueMLJob(url, async () => {
+      return await resolveMLProductUrl(url, pool);
+    });
+
+    if (result.success && result.productUrl) {
+      cache.set(url, result, 10 * 60 * 1000); // 10 minutes cache
+    }
+
     return res.json(result)
   } catch (err: any) {
     console.error('[RESOLVE-SOCIAL ERROR]', err.message)
