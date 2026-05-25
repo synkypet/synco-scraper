@@ -2,6 +2,7 @@ import express from 'express'
 import { BrowserPool } from './browser-pool'
 import { scrape } from './scraper'
 import { cache } from './cache'
+import { resolveMLProductUrl } from './scrapers/ml-resolve-social'
 
 const app = express()
 app.use(express.json())
@@ -21,6 +22,7 @@ function auth(req: express.Request, res: express.Response, next: express.NextFun
 // Inicializa pool
 pool.initialize().then(() => {
   console.log(`[POOL] ${POOL_SIZE} browsers prontos`)
+  console.log(`[SCRAPER-ML] version=ml-direct-offer-timeout-20000-bypass`)
 }).catch(err => {
   console.error('[POOL] Falha ao inicializar:', err)
   process.exit(1)
@@ -52,6 +54,28 @@ app.post('/scrape', auth, async (req, res) => {
   } catch (err: any) {
     console.error('[SCRAPE ERROR]', err.message)
     return res.status(500).json({ error: 'scrape_failed', message: err.message })
+  }
+})
+
+// Endpoint para resolução de links curtos/social do ML
+app.post('/scrape/resolve-social', auth, async (req, res) => {
+  const { url } = req.body
+
+  if (!url || typeof url !== 'string') {
+    return res.status(400).json({ success: false, error: 'url is required', errorCode: 'invalid_url', sourceType: 'unknown' })
+  }
+
+  try {
+    const result = await resolveMLProductUrl(url, pool)
+    return res.json(result)
+  } catch (err: any) {
+    console.error('[RESOLVE-SOCIAL ERROR]', err.message)
+    return res.status(500).json({ 
+      success: false, 
+      sourceType: 'unknown', 
+      errorCode: 'scraper_error', 
+      message: err.message 
+    })
   }
 })
 
