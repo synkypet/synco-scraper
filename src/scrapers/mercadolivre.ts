@@ -36,11 +36,32 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       const originalCents = originalEl?.querySelector('.andes-money-amount__cents')?.textContent?.trim() || '00'
       const originalPrice = originalFraction ? parseFloat(`${originalFraction}.${originalCents}`) : null
 
-      // 2. Preço padrão — "ou R$369,99 em outros meios" (usar este como currentPrice)
-      const subtitleText = document.querySelector('.ui-pdp-price__subtitles')?.textContent || ''
-      const subtitleMatch = subtitleText.match(/R\$\s*([\d.]+(?:,\d{2})?)/)
-      const standardPriceRaw = subtitleMatch?.[1]?.replace(/\./g, '').replace(',', '.') || null
-      const standardPrice = standardPriceRaw ? parseFloat(standardPriceRaw) : null
+      // 2. Preço Principal
+      let mainPrice: number | null = null
+      
+      // Tentativa A: meta tag de preço dentro do schema
+      const metaPrice = document.querySelector('meta[itemprop="price"]')?.getAttribute('content')
+      if (metaPrice) {
+        mainPrice = parseFloat(metaPrice)
+      }
+      
+      // Tentativa B: elemento de preço (price-part container)
+      if (!mainPrice) {
+        const pricePartEl = document.querySelector('[data-testid="price-part"]') || document.querySelector('.ui-pdp-price__part__container')
+        if (pricePartEl) {
+          const fraction = pricePartEl.querySelector('.andes-money-amount__fraction')?.textContent?.replace(/\./g, '') || ''
+          const cents = pricePartEl.querySelector('.andes-money-amount__cents')?.textContent?.trim() || '00'
+          if (fraction) mainPrice = parseFloat(`${fraction}.${cents}`)
+        }
+      }
+
+      // Tentativa C: fallback antigo para subtitles
+      if (!mainPrice) {
+        const subtitleText = document.querySelector('.ui-pdp-price__subtitles')?.textContent || ''
+        const subtitleMatch = subtitleText.match(/ou R\$\s*([\d.]+(?:,\d{2})?)/) || subtitleText.match(/R\$\s*([\d.]+(?:,\d{2})?)/)
+        const standardPriceRaw = subtitleMatch?.[1]?.replace(/\./g, '').replace(',', '.') || null
+        if (standardPriceRaw) mainPrice = parseFloat(standardPriceRaw)
+      }
 
       // 3. Preço no Pix (informativo, não usar como currentPrice)
       const pixEl = document.querySelector('.ui-pdp-price__second-line .andes-money-amount--weight-semibold')
@@ -53,8 +74,8 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       const discountMatch = discountText.match(/(\d+)%/)
       const discountPercent = discountMatch ? parseInt(discountMatch[1]) : 0
 
-      // Lógica de preço final: prefere padrão, fallback para Pix, fallback para original
-      const price = standardPrice ?? pixPrice ?? originalPrice
+      // Lógica de preço final: prefere mainPrice, fallback para Pix, fallback para original
+      const price = mainPrice ?? pixPrice ?? originalPrice
 
       // Imagem
       const image =
