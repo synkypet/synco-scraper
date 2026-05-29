@@ -86,6 +86,35 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       return { title, price, originalPrice, pixPrice, discountPercent, image }
     })
 
+    if (!data.title || !data.price || !data.image) {
+      try {
+        const finalUrl = page.url()
+        const maskedUrl = finalUrl.split('?')[0].replace(/\/p\/[A-Z0-9]+/, '/p/***').replace(/\/MLB-?\d+/, '/MLB-***').replace(/\/up\/[A-Z0-9]+/, '/up/***')
+        const pageTitle = await page.title().catch(() => 'unknown')
+        const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+        const bodyPreview = bodyText.replace(/\s+/g, ' ').substring(0, 800).trim()
+        const bodyLower = bodyText.toLowerCase()
+
+        console.info('[SCRAPER-ML-VISIBLE-DIAG]', {
+          maskedUrl,
+          pageTitle,
+          bodyTextLength: bodyText.length,
+          bodyPreview,
+          hasComprarAgora: bodyLower.includes('comprar agora'),
+          hasAdicionarCarrinho: bodyLower.includes('adicionar ao carrinho'),
+          hasAccountVerification: finalUrl.includes('/gz/account-verification'),
+          hasLoginText: bodyLower.includes('olá! para continuar') || bodyLower.includes('sou novo') || bodyLower.includes('já tenho conta'),
+          hasCaptchaText: bodyLower.includes('captcha'),
+          hasRobotText: bodyLower.includes('verifique que você não é um robô') || bodyLower.includes('robô'),
+          hasCookieText: bodyLower.includes('cookie'),
+          hasOpsText: bodyLower.includes('ops') || bodyLower.includes('não encontramos'),
+          hasMercadoLivreText: bodyLower.includes('mercado livre')
+        })
+      } catch (diagErr) {
+        console.error('[SCRAPER-ML-VISIBLE-DIAG] Failed:', diagErr)
+      }
+    }
+
     return {
       marketplace: 'mercadolivre',
       title: data.title,
