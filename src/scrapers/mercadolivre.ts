@@ -11,7 +11,9 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
     } catch { return url }
   })()
 
-  const page = await ctx.newPage()
+  let page = await ctx.newPage()
+  let accessBlocked = false
+  let blockedReason = ''
 
   try {
     const maxAttempts = 2
@@ -21,13 +23,28 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       console.log(`[SCRAPER-ML-SMART-POLL] start attempt=${attempt} maxMs=${maxMs} intervalMs=${intervalMs}`)
       
-      await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null)
+      // Attempt 1 uses cleanUrl. If blocked, attempt 2 uses the original full URL and clears cookies.
+      const targetUrl = attempt === 1 ? cleanUrl : url
+      
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null)
 
       let elapsedMs = 0
       let successData: any = null
       let lastLogMs = 0
 
       while (elapsedMs < maxMs) {
+        // Fast abort on verification block
+        const currentUrl = page.url()
+        if (currentUrl.includes('/gz/account-verification')) {
+          const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+          if (bodyText.toLowerCase().includes('olá! para continuar, acesse sua conta') || bodyText.toLowerCase().includes('verifique que você não é um robô')) {
+            console.log(`[SCRAPER-ML-ACCESS-BLOCKED] reason=account_verification attempt=${attempt}`)
+            accessBlocked = true
+            blockedReason = 'account_verification'
+            break
+          }
+        }
+        accessBlocked = false
         // Handle cookie banner
         const cookieHandled = await page.evaluate(() => {
           const cookieTexts = ['aceitar cookies', 'aceptar cookies', 'aceitar', 'aceptar', 'entendi', 'continuar']
@@ -128,9 +145,24 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
         } as ScrapeResult & { source: string, offerItemId?: string | null, catalogProductId?: string | null }
       }
 
+      if (accessBlocked) {
+        if (attempt < maxAttempts) {
+          console.log(`[SCRAPER-ML-SMART-POLL] closing blocked page and clearing cookies for retry attempt=${attempt + 1}`)
+          await page.close().catch(() => null)
+          await ctx.clearCookies().catch(() => null)
+          page = await ctx.newPage()
+          continue
+        } else {
+          console.log(`[SCRAPER-ML-SMART-POLL] failed after ${maxAttempts} attempts due to access block`)
+          break
+        }
+      }
+
       if (attempt < maxAttempts) {
         console.log(`[SCRAPER-ML-SMART-POLL] reload attempt=${attempt + 1} reason=timeout_no_core_metadata`)
-        await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null)
+        await page.close().catch(() => null)
+        await ctx.clearCookies().catch(() => null)
+        page = await ctx.newPage()
       } else {
         console.log(`[SCRAPER-ML-SMART-POLL] failed attempts=${maxAttempts} totalMs=${maxAttempts * maxMs} reason=no_product_signals`)
         
@@ -183,8 +215,9 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       image: null,
       currency: 'BRL',
       success: false,
-      error: 'no_selectors_matched'
-    }
+      error: accessBlocked ? blockedReason : 'no_selectors_matched',
+      accessBlocked
+    } as any
 
   } catch (err: any) {
     return {
