@@ -29,6 +29,15 @@ pool.initialize().then(() => {
   process.exit(1)
 })
 
+// Endpoint rápido de healthcheck (antes de qualquer processamento pesado)
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    service: "synco-scraper",
+    version: "ml-queue-dedupe-v1"
+  })
+})
+
 // Heartbeat — para cron externo pingar e manter o Render Free acordado
 app.get('/ping', (req, res) => {
   res.json({ status: 'ok', ts: Date.now() })
@@ -121,5 +130,9 @@ process.on('SIGTERM', async () => {
   process.exit(0)
 })
 
-const PORT = parseInt(process.env.PORT || '3001', 10)
-app.listen(PORT, () => console.log(`[SERVER] Running on :${PORT}`))
+const PORT = Number(process.env.PORT || 3001)
+const HOST = process.env.HOST || '0.0.0.0'
+
+app.listen(PORT, HOST, () => {
+  console.log(`[SERVER] Running on ${HOST}:${PORT}`)
+})
