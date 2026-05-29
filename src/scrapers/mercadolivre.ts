@@ -15,13 +15,68 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
   const page = await ctx.newPage()
 
   try {
-    await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 25000 })
+    const startTime = Date.now()
+    const maskMlUrl = (u: string) => {
+      try {
+        const parsed = new URL(u)
+        parsed.search = ''
+        parsed.hash = ''
+        let masked = parsed.toString()
+        masked = masked.replace(/\/p\/[A-Z0-9]+/, '/p/***').replace(/\/MLB-?\d+/, '/MLB-***').replace(/\/up\/[A-Z0-9]+/, '/up/***')
+        return masked
+      } catch { return u }
+    }
 
+    const checkRedirect = (u: string, event: string) => {
+      const lower = u.toLowerCase()
+      if (lower.includes('/gz/account-verification') || lower.includes('/login') || lower.includes('/registration') || lower.includes('captcha') || lower.includes('challenge')) {
+        console.info('[SCRAPER-ML-REDIRECT-DETECTED]', {
+          reason: lower.includes('account-verification') ? 'account_verification' : 'other_challenge',
+          atEvent: event,
+          url: maskMlUrl(u),
+          elapsedMs: Date.now() - startTime
+        })
+      }
+    }
+
+    console.info('[SCRAPER-ML-NAV]', { event: 'goto_start', url: maskMlUrl(cleanUrl), elapsedMs: 0 })
+
+    page.on('framenavigated', frame => {
+      if (frame === page.mainFrame()) {
+        const u = frame.url()
+        console.info('[SCRAPER-ML-NAV]', { event: 'main_frame_navigated', url: maskMlUrl(u), elapsedMs: Date.now() - startTime })
+        checkRedirect(u, 'main_frame_navigated')
+      }
+    })
+
+    page.on('request', request => {
+      if (request.isNavigationRequest() && request.resourceType() === 'document') {
+        const u = request.url()
+        console.info('[SCRAPER-ML-NAV]', { event: 'document_request', url: maskMlUrl(u), method: request.method(), elapsedMs: Date.now() - startTime })
+        checkRedirect(u, 'document_request')
+      }
+    })
+
+    page.on('response', response => {
+      const req = response.request()
+      if (req.isNavigationRequest() && req.resourceType() === 'document') {
+        const u = response.url()
+        console.info('[SCRAPER-ML-NAV]', { event: 'document_response', status: response.status(), url: maskMlUrl(u), elapsedMs: Date.now() - startTime })
+        checkRedirect(u, 'document_response')
+      }
+    })
+
+    const response = await page.goto(cleanUrl, { waitUntil: 'domcontentloaded', timeout: 25000 }).catch(() => null)
+    console.info('[SCRAPER-ML-NAV]', { event: 'goto_response', status: response ? response.status() : null, url: response ? maskMlUrl(response.url()) : null, elapsedMs: Date.now() - startTime })
+    console.info('[SCRAPER-ML-NAV]', { event: 'after_goto', pageUrl: maskMlUrl(page.url()) })
+
+    console.info('[SCRAPER-ML-NAV]', { event: 'before_wait_selector', pageUrl: maskMlUrl(page.url()) })
     // Aguarda preço renderizar (e aguarda redirecionamento se houver challenge)
-    await page.waitForSelector(
+    const waitSuccess = await page.waitForSelector(
       '.andes-money-amount__fraction, [class*="price-tag-fraction"]',
       { timeout: 20000 }
-    ).catch(() => null)
+    ).then(() => true).catch(() => false)
+    console.info('[SCRAPER-ML-NAV]', { event: 'after_wait_selector', pageUrl: maskMlUrl(page.url()), success: waitSuccess })
 
     const data = await page.evaluate(() => {
       // Título
@@ -115,6 +170,7 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       }
     }
 
+    console.info('[SCRAPER-ML-NAV]', { event: 'before_return', pageUrl: maskMlUrl(page.url()) })
     return {
       marketplace: 'mercadolivre',
       title: data.title,
