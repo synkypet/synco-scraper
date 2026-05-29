@@ -50,21 +50,10 @@ export async function resolveMLProductUrl(
     })
 
     // Abrir a URL com timeout de 15s
-    let gotoTimeout = false
     await page.goto(inputUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 15000
-    }).catch((err) => {
-      if (err.message.includes('Timeout')) gotoTimeout = true
     })
-
-    if (gotoTimeout) {
-      const u = page.url()
-      if (isMLProductUrl(u)) {
-        console.log('[RESOLVE-SOCIAL] goto_timeout_but_url_resolved=true finalKind=catalog')
-        capturedProductUrl = u
-      }
-    }
 
     // Tentar 1: verificar se a própria URL final é um produto (após redirecionamentos)
     const currentUrl = page.url()
