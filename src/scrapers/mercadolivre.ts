@@ -134,6 +134,35 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
       } else {
         console.log(`[SCRAPER-ML-SMART-POLL] failed attempts=${maxAttempts} totalMs=${maxAttempts * maxMs} reason=no_product_signals`)
         
+        try {
+          const finalUrl = page.url()
+          const maskedUrl = finalUrl.split('?')[0].replace(/\/p\/[A-Z0-9]+/, '/p/***').replace(/\/MLB-?\d+/, '/MLB-***')
+          const pageTitle = await page.title().catch(() => 'unknown')
+          const bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '')
+          const bodyPreview = bodyText.substring(0, 800).replace(/\n+/g, ' ').trim()
+          const bodyLower = bodyText.toLowerCase()
+          
+          console.info('[SCRAPER-ML-VISIBLE-DIAG]', {
+            maskedUrl,
+            pageTitle,
+            bodyTextLength: bodyText.length,
+            bodyPreview,
+            hasComprarAgora: bodyLower.includes('comprar agora'),
+            hasAdicionarCarrinho: bodyLower.includes('adicionar ao carrinho'),
+            hasRobotText: bodyLower.includes('robô') || bodyLower.includes('robot'),
+            hasCaptchaText: bodyLower.includes('captcha') || bodyLower.includes('verifique'),
+            hasCookieText: bodyLower.includes('cookies'),
+            hasLoginText: bodyLower.includes('entre na sua conta') || bodyLower.includes('ingresa a tu cuenta'),
+            hasOpsText: bodyLower.includes('ops') || bodyLower.includes('não encontramos')
+          })
+
+          if (process.env.DEBUG_SCRAPER_SCREENSHOT === 'true') {
+            await page.screenshot({ path: `/tmp/ml_fail_${Date.now()}.png` }).catch(() => null)
+          }
+        } catch (diagErr) {
+          console.error('[SCRAPER-ML-VISIBLE-DIAG] Failed to capture diag:', diagErr)
+        }
+
         console.info('[SCRAPER-ML-SELECTORS-FAILED]', {
           reason: 'no_selectors_matched',
           attemptedTitleSelectors: ['h1.ui-pdp-title', 'meta[og:title]'],
