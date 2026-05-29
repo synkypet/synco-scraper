@@ -10,6 +10,15 @@ export interface MLResolveResult {
 
 export interface MLResolveSocialResponse extends MLResolveResult {
   rawProductUrl?: string | null
+  metadata?: {
+    source: string
+    title: string | null
+    image: string | null
+    price: number | null
+    originalPrice: number | null
+    discountLabel: string | null
+    productUrl: string | null
+  }
 }
 
 export async function resolveMLProductUrl(
@@ -53,10 +62,81 @@ export async function resolveMLProductUrl(
     await page.goto(inputUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 15000
-    })
+    }).catch(() => null)
+
+    const currentUrl = page.url()
+
+    // Nova lógica de extração Social Card
+    let socialMetadata = null
+    if (currentUrl.includes('/social/') || await page.locator('.poly-card').count() > 0) {
+      socialMetadata = await page.evaluate(() => {
+        const titleEl = document.querySelector('.poly-component__title')
+        const picEl = document.querySelector('img.poly-component__picture') as HTMLImageElement
+        
+        const titleText = titleEl?.textContent?.trim() || picEl?.alt?.trim() || null
+        
+        let imageSrc = picEl?.src
+        if (!imageSrc) {
+           const anyImg = Array.from(document.querySelectorAll('img')).find(img => img.src.includes('mlstatic.com'))
+           if (anyImg) imageSrc = anyImg.src
+        }
+
+        const linkEl = document.querySelector('a.poly-component__title') as HTMLAnchorElement || document.querySelector('.poly-component__link--action-link') as HTMLAnchorElement
+        const cardProductUrl = linkEl ? linkEl.href : null
+
+        let priceVal: number | null = null
+        let originalPriceVal: number | null = null
+
+        const parseAriaLabelPrice = (text: string): number | null => {
+           const match = text.match(/(\d+[\.\d]*)\s*reai[s]?\s*(?:com\s*(\d+)\s*centavo[s]?)?/i)
+           if (match) {
+             const reais = parseInt(match[1].replace(/\./g, ''))
+             const centavos = parseInt(match[2] || '0')
+             return reais + (centavos / 100)
+           }
+           return null
+        }
+
+        const originalAriaEl = Array.from(document.querySelectorAll('s.andes-money-amount')).find(el => el.getAttribute('aria-label')?.includes('Antes:'))
+        if (originalAriaEl) {
+           originalPriceVal = parseAriaLabelPrice(originalAriaEl.getAttribute('aria-label') || '')
+        }
+        if (!originalPriceVal) {
+           const sEl = document.querySelector('s.andes-money-amount')
+           if (sEl) originalPriceVal = parseAriaLabelPrice(sEl.getAttribute('aria-label') || '')
+        }
+
+        const currentAriaEl = Array.from(document.querySelectorAll('span.andes-money-amount, div.andes-money-amount')).find(el => el.getAttribute('aria-label')?.includes('Agora:'))
+        if (currentAriaEl) {
+           priceVal = parseAriaLabelPrice(currentAriaEl.getAttribute('aria-label') || '')
+        }
+        if (!priceVal) {
+           const currentContainer = document.querySelector('.poly-price__current') || document.querySelector('.andes-money-amount')
+           if (currentContainer && !currentContainer.closest('s')) {
+             const fraction = currentContainer.querySelector('.andes-money-amount__fraction')?.textContent?.replace(/\./g, '') || ''
+             const cents = currentContainer.querySelector('.andes-money-amount__cents')?.textContent?.trim() || '00'
+             if (fraction) priceVal = parseFloat(`${fraction}.${cents}`)
+           }
+        }
+
+        const discountText = document.querySelector('.andes-money-amount__discount')?.textContent?.trim() || null
+
+        return {
+          title: titleText,
+          image: imageSrc || null,
+          productUrl: cardProductUrl,
+          price: priceVal,
+          originalPrice: originalPriceVal,
+          discountLabel: discountText
+        }
+      }).catch(() => null)
+      
+      if (socialMetadata && socialMetadata.productUrl) {
+         if (!capturedProductUrl) capturedProductUrl = socialMetadata.productUrl
+      }
+    }
 
     // Tentar 1: verificar se a própria URL final é um produto (após redirecionamentos)
-    const currentUrl = page.url()
     if (!capturedProductUrl && isMLProductUrl(currentUrl)) {
       capturedProductUrl = currentUrl
     }
@@ -158,7 +238,7 @@ export async function resolveMLProductUrl(
     
     console.log('[RESOLVE-SOCIAL] success: true itemId:', itemId || 'null')
 
-    return {
+    const responseObj: MLResolveSocialResponse = {
       success: true,
       sourceType,
       rawProductUrl: capturedProductUrl,
@@ -166,6 +246,20 @@ export async function resolveMLProductUrl(
       itemId,
       errorCode: null
     }
+
+    if (socialMetadata && socialMetadata.title && socialMetadata.price && socialMetadata.image) {
+      responseObj.metadata = {
+        source: 'social_card',
+        title: socialMetadata.title,
+        image: socialMetadata.image,
+        price: socialMetadata.price,
+        originalPrice: socialMetadata.originalPrice || null,
+        discountLabel: socialMetadata.discountLabel || null,
+        productUrl: socialMetadata.productUrl || capturedProductUrl
+      }
+    }
+
+    return responseObj
 
   } catch (err: any) {
     console.log('[RESOLVE-SOCIAL] error:', err.message)
