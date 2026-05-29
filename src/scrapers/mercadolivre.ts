@@ -71,12 +71,18 @@ export async function scrapeMercadoLivre(url: string, ctx: BrowserContext): Prom
     console.info('[SCRAPER-ML-NAV]', { event: 'after_goto', pageUrl: maskMlUrl(page.url()) })
 
     console.info('[SCRAPER-ML-NAV]', { event: 'before_wait_selector', pageUrl: maskMlUrl(page.url()) })
-    // Aguarda preço renderizar (e aguarda redirecionamento se houver challenge)
-    const waitSuccess = await page.waitForSelector(
-      '.andes-money-amount__fraction, [class*="price-tag-fraction"]',
-      { timeout: 20000 }
-    ).then(() => true).catch(() => false)
-    console.info('[SCRAPER-ML-NAV]', { event: 'after_wait_selector', pageUrl: maskMlUrl(page.url()), success: waitSuccess })
+    
+    // Se já foi redirecionado para login/verificação, nem tentamos esperar
+    if (page.url().includes('account-verification') || page.url().includes('login')) {
+      console.info('[SCRAPER-ML-NAV]', { event: 'aborted_before_wait', reason: 'account_verification' })
+    } else {
+      // Aguarda preço renderizar
+      const waitSuccess = await page.waitForSelector(
+        '.andes-money-amount__fraction, [class*="price-tag-fraction"]',
+        { timeout: 20000 }
+      ).then(() => true).catch(() => false)
+      console.info('[SCRAPER-ML-NAV]', { event: 'after_wait_selector', pageUrl: maskMlUrl(page.url()), success: waitSuccess })
+    }
 
     const data = await page.evaluate(() => {
       // Título
